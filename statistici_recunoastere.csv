@@ -1,0 +1,21 @@
+Algoritm,Norma,K,Rata Recunoastere (%),Timp Mediu Interogare (s)
+NN,Manhattan,-,96.25,0.02127279
+NN,Euclidean,-,95.00,0.02797757
+NN,Infinit,-,23.75,0.02450811
+NN,Cosinus,-,92.50,0.03472358
+k-NN,Manhattan si k=1,1,96.25000000,
+k-NN,Euclidean si k=1,1,95.00000000,
+k-NN,Infinit si k=1,1,25.00000000,
+k-NN,Cosinus si k=1,1,92.50000000,
+k-NN,Manhattan si k=3,3,97.50000000,
+k-NN,Euclidean si k=3,3,93.75000000,
+k-NN,Infinit si k=3,3,21.25000000,
+k-NN,Cosinus si k=3,3,88.75000000,
+k-NN,Manhattan si k=5,5,96.25000000,
+k-NN,Euclidean si k=5,5,93.75000000,
+k-NN,Infinit si k=5,5,23.75000000,
+k-NN,Cosinus si k=5,5,92.50000000,
+k-NN,Manhattan si k=7,7,92.50000000,
+k-NN,Euclidean si k=7,7,92.50000000,
+k-NN,Infinit si k=7,7,23.75000000,
+k-NN,Cosinus si k=7,7,93.75000000,
