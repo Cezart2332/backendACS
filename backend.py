@@ -1,6 +1,7 @@
 import os
 import time
 import statistics as st
+import base64
 import cv2
 import numpy as np
 from numpy import linalg as la
@@ -19,7 +20,7 @@ NR_POZE_TESTARE = 0
 PREPROCESSED = False
 STATS_RUNNED = False
 
-norme = ["Manhattan", "Euclidean", "Infinit", "Cosinus"]
+norme = ["Manhattan", "Euclidean", "Infinity", "Cosinus"]
 
 def preprocessing(training_num):
     global A, T, NR_POZE_ANTRENARE, NR_POZE_TESTARE, PREPROCESSED, STATS_RUNNED
@@ -66,7 +67,7 @@ def nn(norm, p):
             z[i] = la.norm(A[:, i] - p, 1)
         elif norm == "Euclidean":
             z[i] = la.norm(A[:, i] - p, 2)
-        elif norm == "Infinit":
+        elif norm == "Infinity":
             z[i] = la.norm(A[:, i] - p, np.inf)
         elif norm == "Cosinus":
             z[i] = 1 - (np.dot(A[:, i], p)) / (la.norm(A[:, i], 2) * la.norm(p, 2))
@@ -85,7 +86,7 @@ def k_nn(norm, p, k):
             z[i] = la.norm(A[:, i] - p, 1)
         elif norm == "Euclidean":
             z[i] = la.norm(A[:, i] - p, 2)
-        elif norm == "Infinit":
+        elif norm == "Infinity":
             z[i] = la.norm(A[:, i] - p, np.inf)
         elif norm == "Cosinus":
             z[i] = 1 - (np.dot(A[:, i], p)) / (la.norm(A[:, i], 2) * la.norm(p, 2))
@@ -93,6 +94,7 @@ def k_nn(norm, p, k):
             raise ValueError("Norma Invalida!")
     indicii = np.argsort(z)[:k]
     pozitii = indicii // NR_POZE_ANTRENARE
+
     pozitia = st.mode(pozitii) * NR_POZE_ANTRENARE
     return pozitia
 
@@ -165,12 +167,6 @@ def after_request(response):
 @app.route("/")
 def hello_world():
     return "<p>Hello, World!</p>"
-
-@app.route("/statistics")
-def statistics_route():
-    if STATS_RUNNED is False:
-        statistics()
-    return f"<pre>{rata_recunoastere_text}\n{timp_interogare_text}</pre>"
 
 @app.route("/statistics/export/<format_type>")
 def export_statistics(format_type):
@@ -254,3 +250,92 @@ def export_statistics(format_type):
 def preprocessing_route(training_num):
     preprocessing(training_num)
     return "Preprocesarea a fost finalizata."
+
+@app.route("/image/<int:person>/<int:photo>")
+def get_image(person, photo):
+    """Serve a face image as base64 encoded PNG."""
+    try:
+        path = "./att_faces"
+        if not os.path.isdir(path):
+            return {"error": "Dataset folder not found."}, 404
+        
+        if person < 1 or person > NR_PERSOANE:
+            return {"error": f"Person must be between 1 and {NR_PERSOANE}."}, 400
+        
+        if photo < 1 or photo > NR_POZE_TOTALE:
+            return {"error": f"Photo must be between 1 and {NR_POZE_TOTALE}."}, 400
+        
+        image_path = f"{path}/s{person}/{photo}.pgm"
+        
+        if not os.path.isfile(image_path):
+            return {"error": "Image file not found."}, 404
+        
+        # Read the image
+        img = cv2.imread(image_path, 0)  # type: ignore
+        if img is None:
+            return {"error": "Failed to read image."}, 500
+        
+        # Encode as PNG
+        success, buffer = cv2.imencode('.png', img)  # type: ignore
+        if not success:
+            return {"error": "Failed to encode image."}, 500
+        
+        # Convert to base64
+        img_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        return {
+            "success": True,
+            "person": person,
+            "photo": photo,
+            "image": f"data:image/png;base64,{img_base64}"
+        }
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+@app.route("/search/<int:photo_index>/<string:method>/<string:norma>/<int:k>")
+def search_route(photo_index, method, norma, k):
+    """Search for a matching face and return the matched image."""
+    try:
+        if not PREPROCESSED:
+            return {"error": "Datele nu au fost preprocesate."}, 400
+        
+        # Perform search
+        if method == "nn":
+            pozitia = nn(norma, T[:, photo_index])
+        elif method == "k_nn":
+            if k is None:
+                return {"error": "Parametrul k este necesar pentru metoda k_nn."}, 400
+            pozitia = k_nn(norma, T[:, photo_index], k)
+        else:
+            return {"error": "Metoda invalida. Foloseste 'nn' sau 'k_nn'."}, 400
+        
+        # Calculate matched person and photo from position in training matrix
+        matched_person = int((pozitia // NR_POZE_ANTRENARE) + 1)
+        matched_photo = int((pozitia % NR_POZE_ANTRENARE) + 1)
+        
+        # Get the image vector from training matrix
+        matched_vector = A[:, pozitia]
+        
+        # Reshape to image dimensions (112x92 for AT&T faces)
+        matched_image = matched_vector.reshape(112, 92)
+        
+        # Encode as PNG
+        success, buffer = cv2.imencode('.png', matched_image.astype(np.uint8))  # type: ignore
+        if not success:
+            return {"error": "Failed to encode matched image."}, 500
+        
+        # Convert to base64
+        img_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        return {
+            "success": True,
+            "matched_person": matched_person,
+            "matched_photo": matched_photo,
+            "matched_position": int(pozitia),
+            "image": f"data:image/png;base64,{img_base64}",
+            "method": method,
+            "norm": norma,
+            "k": k if method == "k_nn" else None
+        }
+    except Exception as e:
+        return {"error": str(e)}, 500
