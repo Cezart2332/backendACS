@@ -17,7 +17,11 @@ norme = ["Manhattan","Euclidean","Infinit","Cosinus"]
 A=np.zeros([10304,320])
 T=np.zeros([10304,80])
 
-path = '/home/cezar/Desktop/ProiectACS/Lab2/att_faces'
+path = "./att_faces"
+
+
+
+
 if not os.path.isdir(path):
     raise FileNotFoundError(f"Folderul '{path}' nu exista. Verifica calea.")
 
@@ -74,53 +78,3 @@ def kNN(norm,A,p,k):
         return pozitia
 
 
-
-rataRecunoastereText = "Statistici NN:\n"
-timpInterogareText = "Statistici NN:\n"
-print("Statistici NN:")
-for norma in norme:
-    nrRecunoasteriCorecte=0 
-    timpTotalInterogare=0
-    for j in range(len(T[0])):
-        t0 = time.perf_counter()
-        persoanaTestata = j // 2
-        persoanaCautata = NN(norma,A,T[:,j]) // 8
-        t1 = time.perf_counter()
-        timpTotalInterogare += t1-t0
-        if(persoanaTestata == persoanaCautata):
-            nrRecunoasteriCorecte = nrRecunoasteriCorecte +1 
-    rr=nrRecunoasteriCorecte/nrTotalTeste 
-    print(f'Rata de recunoastere norma={norma}: {rr*100:.2f}%') 
-    tmi=timpTotalInterogare/nrTotalTeste 
-    print(f'Timp mediu de interogare norma={norma}: {tmi:.8f}')
-    rataRecunoastereText += f'Rata de recunoastere norma={norma}: {rr*100:.2f}%\n'
-    timpInterogareText += f'Timp mediu de interogare norma={norma}: {tmi:.8f}\n'
-
-
-
-rataRecunoastereText += "Statistici kNN:\n"
-timpInterogareText += "Statistici kNN:\n"
-print("Statistici kNN:")
-for k in range(1,9,2):
-    for norma in norme:
-        nrRecunoasteriCorecte=0 
-        timpTotalInterogare=0
-        for j in range(len(T[0])):
-            t0 = time.perf_counter()
-            persoanaTestata = j // 2
-            persoanaCautata = kNN(norma,A,T[:,j],k) // 8
-            t1 = time.perf_counter()
-            timpTotalInterogare += t1-t0
-            if(persoanaTestata == persoanaCautata):
-                nrRecunoasteriCorecte = nrRecunoasteriCorecte +1 
-        rr=nrRecunoasteriCorecte/nrTotalTeste 
-        print(f'Rata de recunoastere norma={norma} si k={k}: {rr*100:.2f}%') 
-        tmi=timpTotalInterogare/nrTotalTeste 
-        print(f'Timp mediu de interogare norma={norma} si k={k}: {tmi:.8f}')
-        rataRecunoastereText += f'Rata de recunoastere norma={norma} si k={k}: {rr*100:.8f}%\n'
-        timpInterogareText += f'Timp mediu de interogare norma={norma} si k={k}: {tmi:.8f}\n'
-
-with open("rataRecunoastere.txt", "w", encoding="utf-8") as file:
-    file.write(rataRecunoastereText)
-with open("timpInterogare.txt", "w", encoding="utf-8") as file:
-    file.write(timpInterogareText)

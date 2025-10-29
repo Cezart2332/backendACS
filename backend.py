@@ -1,13 +1,17 @@
 import os
-import time
 import statistics as st
+import time
+from io import StringIO, BytesIO
 import base64
 import cv2
 import numpy as np
 from numpy import linalg as la
+import matplotlib
+matplotlib.use('Agg')  # Use non-GUI backend
+import matplotlib.pyplot as plt
 
 from flask import Flask, send_file, make_response
-from io import StringIO, BytesIO
+
 import csv
 
 poze = []
@@ -19,11 +23,12 @@ NR_POZE_ANTRENARE = 0
 NR_POZE_TESTARE = 0
 PREPROCESSED = False
 STATS_RUNNED = False
+STATS_DATA = None
 
 norme = ["Manhattan", "Euclidean", "Infinity", "Cosinus"]
 
 def preprocessing(training_num):
-    global A, T, NR_POZE_ANTRENARE, NR_POZE_TESTARE, PREPROCESSED, STATS_RUNNED
+    global A, T, NR_POZE_ANTRENARE, NR_POZE_TESTARE, PREPROCESSED, STATS_RUNNED, STATS_DATA
     NR_POZE_ANTRENARE = training_num
     NR_POZE_TESTARE = NR_POZE_TOTALE - NR_POZE_ANTRENARE
     print(f"Numar poze antrenare setat la: {NR_POZE_ANTRENARE}")
@@ -57,10 +62,11 @@ def preprocessing(training_num):
             T[:, coloana] = test_photo
     PREPROCESSED = True
     STATS_RUNNED = False
+    STATS_DATA = None
 
 def nn(norm, p):
     if PREPROCESSED is False:
-        raise Exception("Datele nu au fost preprocesate. Ruleaza preprocessing() mai intai.")
+        raise Exception("Datele nu au fost preprocesate. Ruleaza preprocessing mai intai.")
     z = np.zeros(len(A[0]))
     for i in range(len(A[0])):
         if norm == "Manhattan":
@@ -79,7 +85,7 @@ def nn(norm, p):
 
 def k_nn(norm, p, k):
     if PREPROCESSED is False:
-        raise Exception("Datele nu au fost preprocesate. Ruleaza preprocessing() mai intai.")
+        raise Exception("Datele nu au fost preprocesate. Ruleaza preprocessing mai intai.")
     z = np.zeros(len(A[0]))
     for i in range(len(A[0])):
         if norm == "Manhattan":
@@ -94,22 +100,24 @@ def k_nn(norm, p, k):
             raise ValueError("Norma Invalida!")
     indicii = np.argsort(z)[:k]
     pozitii = indicii // NR_POZE_ANTRENARE
-
     pozitia = st.mode(pozitii) * NR_POZE_ANTRENARE
     return pozitia
+    
 
 
 def statistics():
-    global STATS_RUNNED, rata_recunoastere_text, timp_interogare_text
+    global STATS_RUNNED, rata_recunoastere_text, timp_interogare_text, STATS_DATA
     if PREPROCESSED is False:
-        raise Exception("Datele nu au fost preprocesate. Ruleaza preprocessing() mai intai.")
+        raise Exception("Datele nu au fost preprocesate. Ruleaza preprocessing mai intai.")
     if STATS_RUNNED is True:
         raise Exception("Statistici deja calculate. Ruleaza preprocessing() cu alta configuratie pentru a reseta.")
     nr_total_teste = NR_PERSOANE * (10 - NR_POZE_ANTRENARE)
+    STATS_DATA = {"nn": [], "k_nn": []}
     rata_recunoastere_text = "Statistici nn:\n"
     timp_interogare_text = "Statistici nn:\n"
     print("Statistici nn:")
     for norma in norme:
+        print(f"Calcul statistici pentru norma: {norma}")
         nr_recunoasteri_corecte = 0
         timp_total_interogare = 0
         for j in range(len(T[0])):
@@ -121,10 +129,12 @@ def statistics():
             if persoana_testata == persoane_cautata:
                 nr_recunoasteri_corecte = nr_recunoasteri_corecte + 1
         rr = nr_recunoasteri_corecte / nr_total_teste
-        print(f"Rata de recunoastere norma={norma}: {rr*100:.2f}%")
+        rata_procente = rr * 100
         tmi = timp_total_interogare / nr_total_teste
+        STATS_DATA["nn"].append({"norm": norma, "rate": rata_procente, "time": tmi})
+        print(f"Rata de recunoastere norma={norma}: {rata_procente:.2f}%")
         print(f"Timp mediu de interogare norma={norma}: {tmi:.8f}")
-        rata_recunoastere_text += f"Rata de recunoastere norma={norma}: {rr*100:.2f}%\n"
+        rata_recunoastere_text += f"Rata de recunoastere norma={norma}: {rata_procente:.2f}%\n"
         timp_interogare_text += f"Timp mediu de interogare norma={norma}: {tmi:.8f}\n"
 
     rata_recunoastere_text += "Statistici k_nn:\n"
@@ -143,15 +153,14 @@ def statistics():
                 if persoana_testata == persoane_cautata:
                     nr_recunoasteri_corecte = nr_recunoasteri_corecte + 1
             rr = nr_recunoasteri_corecte / nr_total_teste
-            print(f"Rata de recunoastere norma={norma} si k={k}: {rr*100:.2f}%")
+            rata_procente = rr * 100
             tmi = timp_total_interogare / nr_total_teste
+            STATS_DATA["k_nn"].append({"norm": norma, "k": k, "rate": rata_procente, "time": tmi})
+            print(f"Rata de recunoastere norma={norma} si k={k}: {rata_procente:.2f}%")
             print(f"Timp mediu de interogare norma={norma} si k={k}: {tmi:.8f}")
-            rata_recunoastere_text += (
-                f"Rata de recunoastere norma={norma} si k={k}: {rr*100:.8f}%\n"
-            )
-            timp_interogare_text += (
-                f"Timp mediu de interogare norma={norma} si k={k}: {tmi:.8f}\n"
-            )
+            rata_recunoastere_text += f"Rata de recunoastere norma={norma} si k={k}: {rata_procente:.8f}%\n"
+            timp_interogare_text += f"Timp mediu de interogare norma={norma} si k={k}: {tmi:.8f}\n"
+            
     STATS_RUNNED = True
 
 app = Flask(__name__)
@@ -160,7 +169,7 @@ app = Flask(__name__)
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Cache-Control')
     response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     return response
 
@@ -175,6 +184,8 @@ def export_statistics(format_type):
         return {"error": "Datele nu au fost preprocesate."}, 400
     if STATS_RUNNED is False:
         statistics()
+    if STATS_DATA is None:
+        return {"error": "Statistici indisponibile."}, 500
     
     if format_type == 'txt':
         # Create TXT file
@@ -198,53 +209,106 @@ def export_statistics(format_type):
         )
     
     elif format_type == 'csv':
-        # Parse the statistics and create CSV
+        # Create CSV from structured statistics data
         output = StringIO()
         writer = csv.writer(output)
-        
-        # Write CSV headers
+
         writer.writerow(['Algoritm', 'Norma', 'K', 'Rata Recunoastere (%)', 'Timp Mediu Interogare (s)'])
-        
-        # Parse NN statistics
-        lines = rata_recunoastere_text.split('\n')
-        time_lines = timp_interogare_text.split('\n')
-        
-        for i, line in enumerate(lines):
-            if 'Rata de recunoastere norma=' in line:
-                # Extract norm and rate
-                norm = line.split('norma=')[1].split(':')[0]
-                rate = line.split(': ')[1].replace('%', '').strip()
-                
-                # Find corresponding time
-                time_val = ''
-                for time_line in time_lines:
-                    if f'norma={norm}' in time_line and 'k=' not in time_line:
-                        time_val = time_line.split(': ')[1].strip()
-                        break
-                
-                if ' si k=' in line:
-                    # k-NN entry
-                    k_val = line.split('k=')[1].split(':')[0]
-                    writer.writerow(['k-NN', norm, k_val, rate, time_val])
-                else:
-                    # NN entry
-                    writer.writerow(['NN', norm, '-', rate, time_val])
-        
-        # Convert to bytes
+
+        for entry in STATS_DATA["nn"]:
+            writer.writerow([
+                'NN',
+                entry['norm'],
+                '-',
+                f"{entry['rate']:.2f}",
+                f"{entry['time']:.8f}"
+            ])
+
+        for entry in STATS_DATA["k_nn"]:
+            writer.writerow([
+                'k-NN',
+                entry['norm'],
+                entry['k'],
+                f"{entry['rate']:.2f}",
+                f"{entry['time']:.8f}"
+            ])
+
         mem = BytesIO()
         mem.write(output.getvalue().encode('utf-8'))
         mem.seek(0)
         output.close()
-        
+
         return send_file(
             mem,
             mimetype='text/csv',
             as_attachment=True,
             download_name='statistici_recunoastere.csv'
         )
-    
+
     else:
         return {"error": "Format invalid. Foloseste 'txt' sau 'csv'."}, 400
+
+
+@app.route("/statistics/graph")
+def statistics_graph():
+    if PREPROCESSED is False:
+        return {"error": "Datele nu au fost preprocesate."}, 400
+    if STATS_RUNNED is False:
+        statistics()
+    if STATS_DATA is None:
+        return {"error": "Statistici indisponibile."}, 500
+
+    norms_order = [entry['norm'] for entry in STATS_DATA["nn"]]
+    nn_by_norm = {entry['norm']: entry for entry in STATS_DATA["nn"]}
+
+    k_values = sorted({1} | {entry['k'] for entry in STATS_DATA["k_nn"]})
+
+    knn_lookup = {}
+    for entry in STATS_DATA["k_nn"]:
+        knn_lookup.setdefault((entry['norm'], entry['k']), entry)
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), layout='constrained')
+
+    colors = plt.cm.viridis(np.linspace(0, 1, len(norms_order))) if norms_order else []
+
+    for idx, norm in enumerate(norms_order):
+        color = colors[idx] if idx < len(colors) else None
+        rates_line = []
+        times_line = []
+        for k in k_values:
+            if k == 1:
+                nn_entry = nn_by_norm.get(norm)
+                rates_line.append(nn_entry['rate'] if nn_entry else np.nan)
+                times_line.append(nn_entry['time'] if nn_entry else np.nan)
+            else:
+                entry = knn_lookup.get((norm, k))
+                rates_line.append(entry['rate'] if entry else np.nan)
+                times_line.append(entry['time'] if entry else np.nan)
+
+        axes[0].plot(k_values, rates_line, marker='o', label=f"{norm}", color=color)
+        axes[1].plot(k_values, times_line, marker='o', label=f"{norm}", color=color)
+
+    axes[0].set_title('Rata de recunoastere (%)')
+    axes[0].set_ylabel('Procente (%)')
+    axes[0].set_xticks(k_values)
+    axes[0].set_xlabel('K-uri')
+    axes[0].grid(axis='both', linestyle='--', alpha=0.3)
+
+    axes[1].set_title('Timp mediu de interogare (s)')
+    axes[1].set_ylabel('Secunde')
+    axes[1].set_xticks(k_values)
+    axes[1].set_xlabel('K-uri')
+    axes[1].grid(axis='both', linestyle='--', alpha=0.3)
+
+    axes[0].legend(title='Norma', loc='best')
+    axes[1].legend(title='Norma', loc='best')
+
+    img_bytes = BytesIO()
+    fig.savefig(img_bytes, format='png')
+    plt.close(fig)
+    img_bytes.seek(0)
+
+    return send_file(img_bytes, mimetype='image/png')
 
 @app.route("/preprocessing/<int:training_num>")
 def preprocessing_route(training_num):
