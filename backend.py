@@ -17,10 +17,47 @@ import csv
 poze = []
 RC = None
 HQPB_RC = None
-MEDIA_RC = None
 PROIECTII_RC = None
+
+# Database configurations
+DATABASES = {
+    "att_faces": {
+        "path": "./att_faces",
+        "folder_prefix": "s",
+        "person_count": 40,
+        "photo_count": 10,
+        "image_size": (112, 92),
+        "pixels": 10304,
+        "label": "AT&T Faces"
+    },
+    "ctovf": {
+        "path": "./ctovf",
+        "folder_prefix": "fata",
+        "person_count": 11,
+        "photo_count": 10,
+        "image_size": (112, 92),
+        "pixels": 10304,
+        "label": "CTOVF Faces"
+    },
+    "digits": {
+        "path": "./digits",
+        "folder_prefix": "cifra",
+        "person_count": 10,
+        "photo_count": 10,
+        "image_size": (112, 92),
+        "pixels": 10304,
+        "label": "Digits"
+    }
+}
+
+CURRENT_DATABASE = "att_faces"
 NR_PERSOANE = 40
 NR_POZE_TOTALE = 10
+IMAGE_PIXELS = 10304
+IMAGE_SIZE = (112, 92)
+DATABASE_PATH = "./att_faces"
+FOLDER_PREFIX = "s"
+
 A = None
 T = None
 NR_POZE_ANTRENARE = 0
@@ -46,9 +83,36 @@ PREPROCESSING_LABELS = [
 
 norme = ["Manhattan", "Euclidean", "Infinity", "Cosinus"]
 
+def set_database(db_name):
+    """Switch to a different database."""
+    global CURRENT_DATABASE, NR_PERSOANE, NR_POZE_TOTALE, IMAGE_PIXELS, IMAGE_SIZE, DATABASE_PATH, FOLDER_PREFIX
+    global PREPROCESSED, STATS_RUNNED, STATS_DATA, A, T
+    
+    if db_name not in DATABASES:
+        raise ValueError(f"Unknown database: {db_name}. Available: {list(DATABASES.keys())}")
+    
+    db_config = DATABASES[db_name]
+    CURRENT_DATABASE = db_name
+    NR_PERSOANE = db_config["person_count"]
+    NR_POZE_TOTALE = db_config["photo_count"]
+    IMAGE_PIXELS = db_config["pixels"]
+    IMAGE_SIZE = db_config["image_size"]
+    DATABASE_PATH = db_config["path"]
+    FOLDER_PREFIX = db_config["folder_prefix"]
+    
+    # Reset preprocessing state when switching databases
+    PREPROCESSED = False
+    STATS_RUNNED = False
+    STATS_DATA = None
+    A = None
+    T = None
+    
+    print(f"Switched to database: {db_name} ({db_config['label']})")
+    print(f"  - Persons: {NR_PERSOANE}, Photos per person: {NR_POZE_TOTALE}")
+
 def build_rc():
     global RC 
-    RC = np.zeros((10304, NR_PERSOANE), dtype=float)
+    RC = np.zeros((IMAGE_PIXELS, NR_PERSOANE), dtype=float)
     for i in range(NR_PERSOANE):
         start = i * NR_POZE_ANTRENARE
         end = start + NR_POZE_ANTRENARE
@@ -66,21 +130,31 @@ def preprocceseg():
     l = np.dot(B.T,B)
     d,v = la.eig(l)
     v = np.dot(B,v)
+    # Normalize eigenvectors
+    for i in range(v.shape[1]):
+        v[:, i] = v[:, i] / la.norm(v[:, i])
     indici = np.argsort(d)[::-1]
+    d = d[indici]
     v = v[:,indici]
-    k = K
-    HQPB = v[:, :k]
+    # Only keep eigenvectors with non-zero eigenvalues
+    k = min(K, np.sum(d > 1e-10))
+    HQPB = v[:, :k].real  # Take real part in case of complex numbers
     PROIECTII = np.dot(B.T, HQPB)
     PREPROCESSING_TIMES["Eigenfaces"] = time.perf_counter() - start_time
 def preprocesseg_rc():
     build_rc()
-    global MEDIA_RC, PROIECTII_RC, PREPROCESSING_TIMES
+    global PROIECTII_RC, HQPB_RC, PREPROCESSING_TIMES
     start_time = time.perf_counter()
 
-    RC_COPY = RC.copy()
-    MEDIA_RC = np.mean(RC_COPY, axis=1)
-    RC_COPY = (RC_COPY.T - MEDIA).T
-    PROIECTII_RC = np.dot(RC_COPY.T, HQPB)
+    # Center RC using the global MEDIA (same as used for training images)
+    RC_CENTERED = (RC.T - MEDIA).T
+    
+    # Project class representatives onto eigenface space
+    PROIECTII_RC = np.dot(RC_CENTERED.T, HQPB)
+    
+    # Also compute dedicated eigenvectors for RC (optional, for comparison)
+    HQPB_RC = HQPB  # Use same eigenvectors as standard Eigenfaces
+    
     PREPROCESSING_TIMES["Eigenfaces with RC"] = time.perf_counter() - start_time
 
 def preproccesslanczos(K):
@@ -143,39 +217,40 @@ def preprocessing(training_num):
     global A, T, NR_POZE_ANTRENARE, NR_POZE_TESTARE, PREPROCESSED, STATS_RUNNED, STATS_DATA,MEDIA,HQPB,PROIECTII, PREPROCESSING_TIMES
     NR_POZE_ANTRENARE = training_num
     NR_POZE_TESTARE = NR_POZE_TOTALE - NR_POZE_ANTRENARE
+    print(f"Database: {CURRENT_DATABASE}")
     print(f"Numar poze antrenare setat la: {NR_POZE_ANTRENARE}")
-    print(f"Initializare matrice A de dimensiune: {10304} x {40*NR_POZE_ANTRENARE}")
-    print(f"Initializare matrice T de dimensiune: {10304} x {40*NR_POZE_TESTARE}")
-    A = np.zeros([10304, 40*NR_POZE_ANTRENARE])
-    T = np.zeros([10304, 40*NR_POZE_TESTARE])
-    path = "./att_faces"
+    print(f"Initializare matrice A de dimensiune: {IMAGE_PIXELS} x {NR_PERSOANE*NR_POZE_ANTRENARE}")
+    print(f"Initializare matrice T de dimensiune: {IMAGE_PIXELS} x {NR_PERSOANE*NR_POZE_TESTARE}")
+    A = np.zeros([IMAGE_PIXELS, NR_PERSOANE*NR_POZE_ANTRENARE])
+    T = np.zeros([IMAGE_PIXELS, NR_PERSOANE*NR_POZE_TESTARE])
+    path = DATABASE_PATH
     if not os.path.isdir(path):
         raise FileNotFoundError(f"Folderul '{path}' nu exista. Verifica calea.")
 
     for i in range(1, NR_PERSOANE + 1):
-        person_path = path + "/s" + str(i) + "/"
+        person_path = path + "/" + FOLDER_PREFIX + str(i) + "/"
         for j in range(1, NR_POZE_ANTRENARE + 1):
             person_training_path = person_path + str(j) + ".pgm"
             training_photo = np.array(cv2.imread(person_training_path, 0)) # type: ignore
             training_photo = training_photo.reshape(
-                10304,
+                IMAGE_PIXELS,
             )
             A[:, NR_POZE_ANTRENARE * (i - 1) + (j - 1)] = training_photo
 
     for i in range(1, NR_PERSOANE + 1):
-        person_path = path + "/s" + str(i) + "/"
+        person_path = path + "/" + FOLDER_PREFIX + str(i) + "/"
         for j in range(NR_POZE_ANTRENARE + 1, NR_POZE_TOTALE + 1):
             person_test_path = person_path + str(j) + ".pgm"
             test_photo = np.array(cv2.imread(person_test_path, 0)) # type: ignore
             test_photo = test_photo.reshape(
-                10304,
+                IMAGE_PIXELS,
             )
             coloana = (NR_POZE_TESTARE) * (i - 1) + (j - (NR_POZE_ANTRENARE + 1))
             T[:, coloana] = test_photo
     PREPROCESSING_TIMES = {}
     preprocceseg()
     preprocesseg_rc()
-    preproccesslanczos(100)  # Initialize Lanczos with K=100 components
+    preproccesslanczos(100) 
     PREPROCESSED = True
     STATS_RUNNED = False
     STATS_DATA = None
@@ -238,7 +313,6 @@ def eigenfaces_rc(norm, p):
 
     centered = p - MEDIA
     p_test = np.dot(centered, HQPB)
-
     pozitia = nn(norm, p_test, PROIECTII_RC.T) 
 
     return int(pozitia * NR_POZE_ANTRENARE)
@@ -376,7 +450,6 @@ def statistics():
 
 app = Flask(__name__)
 
-# Enable CORS for all routes
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -611,6 +684,52 @@ def preprocessing_graph():
 
     return send_file(img_bytes, mimetype='image/png')
 
+@app.route("/databases")
+def get_databases():
+    """Get list of available databases."""
+    return {
+        "success": True,
+        "databases": [
+            {
+                "id": db_id,
+                "label": db_config["label"],
+                "person_count": db_config["person_count"],
+                "photo_count": db_config["photo_count"]
+            }
+            for db_id, db_config in DATABASES.items()
+        ],
+        "current": CURRENT_DATABASE
+    }
+
+@app.route("/database/<string:db_name>")
+def switch_database(db_name):
+    """Switch to a different database."""
+    try:
+        set_database(db_name)
+        return {
+            "success": True,
+            "message": f"Switched to {DATABASES[db_name]['label']}",
+            "database": db_name,
+            "person_count": NR_PERSOANE,
+            "photo_count": NR_POZE_TOTALE
+        }
+    except ValueError as e:
+        return {"error": str(e)}, 400
+
+@app.route("/database/info")
+def get_current_database_info():
+    """Get current database configuration."""
+    return {
+        "success": True,
+        "database": CURRENT_DATABASE,
+        "label": DATABASES[CURRENT_DATABASE]["label"],
+        "person_count": NR_PERSOANE,
+        "photo_count": NR_POZE_TOTALE,
+        "preprocessed": PREPROCESSED,
+        "training_photos": NR_POZE_ANTRENARE if PREPROCESSED else 0,
+        "testing_photos": NR_POZE_TESTARE if PREPROCESSED else 0
+    }
+
 @app.route("/preprocessing/<int:training_num>")
 def preprocessing_route(training_num):
     preprocessing(training_num)
@@ -620,7 +739,7 @@ def preprocessing_route(training_num):
 def get_image(person, photo):
     """Serve a face image as base64 encoded PNG."""
     try:
-        path = "./att_faces"
+        path = DATABASE_PATH
         if not os.path.isdir(path):
             return {"error": "Dataset folder not found."}, 404
         
@@ -630,7 +749,7 @@ def get_image(person, photo):
         if photo < 1 or photo > NR_POZE_TOTALE:
             return {"error": f"Photo must be between 1 and {NR_POZE_TOTALE}."}, 400
         
-        image_path = f"{path}/s{person}/{photo}.pgm"
+        image_path = f"{path}/{FOLDER_PREFIX}{person}/{photo}.pgm"
         
         if not os.path.isfile(image_path):
             return {"error": "Image file not found."}, 404
@@ -687,8 +806,8 @@ def search_route(photo_index, method, norma, k):
         # Get the image vector from training matrix
         matched_vector = A[:, pozitia]
         
-        # Reshape to image dimensions (112x92 for AT&T faces)
-        matched_image = matched_vector.reshape(112, 92)
+        # Reshape to image dimensions (dynamic based on database)
+        matched_image = matched_vector.reshape(IMAGE_SIZE[0], IMAGE_SIZE[1])
         
         # Encode as PNG
         success, buffer = cv2.imencode('.png', matched_image.astype(np.uint8))  # type: ignore

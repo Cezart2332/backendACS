@@ -9,4 +9,5 @@ COPY . .
 
 EXPOSE 5000
 
-CMD flask --app backend run --host=0.0.0.0
+CMD python -m flask --app backend run --host=0.0.0.0
+
